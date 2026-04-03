@@ -1,0 +1,29 @@
+.panel {
+  text-align: center;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: 60px 60px 60px;
+  gap: 10px;
+  justify-content: center;
+}
+
+.btn {
+  padding: 12px;
+  font-size: 18px;
+  cursor: pointer;
+}
+
+.stop {
+  background: red;
+  color: white;
+}
+
+.speed {
+  margin-top: 20px;
+}
+
+.reset {
+  margin-top: 15px;
+}
