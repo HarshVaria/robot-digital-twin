@@ -1,0 +1,24 @@
+{
+  "name": "robot-digital-twin",
+  "version": "1.0.0",
+  "description": "Robot Digital Twin & Control Simulator",
+  "scripts": {
+    "install-all": "cd client && npm install && cd ../server && npm install",
+    "client": "cd client && npm run dev",
+    "server": "cd server && node index.js",
+    "dev": "concurrently \"npm run server\" \"npm run client\""
+  },
+  "keywords": [
+    "robot",
+    "digital-twin",
+    "simulation",
+    "threejs",
+    "pid",
+    "path-planning"
+  ],
+  "author": "Manav, Harsh, Pulin, Meetraj",
+  "license": "MIT",
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
