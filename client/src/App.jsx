@@ -1,5 +1,5 @@
-import ControlPanel from './ControlPanel'
-import { useWebSocket } from './useWebSocket'
+import ControlPanel from './components/Dashboard/ControlPanel'
+import { useWebSocket } from './hooks/useWebSocket'
 
 function App() {
 
