@@ -265,6 +265,22 @@ app.get('/api/settings', (req, res) => {
   res.json(simSettings)
 })
 
+// ========== UPDATE SIMULATION SETTINGS ==========
+app.post('/api/settings', (req, res) => {
+  const allowed = ['physicsFPS', 'sensorUpdateRate', 'maxSpeed', 'worldSize', 'boundaryLimit']
+  const updates = {}
+
+  for (const key of allowed) {
+    if (req.body[key] !== undefined) {
+      simSettings[key] = req.body[key]
+      updates[key] = req.body[key]
+    }
+  }
+
+  io.emit('simSettings', simSettings)
+  res.json({ message: 'Settings updated', updated: updates, settings: simSettings })
+})
+
 app.post('/api/reset', (req, res) => {
   robotState.position = { x: 0, y: 0.5, z: 0 }
   robotState.rotation = { y: 0 }
