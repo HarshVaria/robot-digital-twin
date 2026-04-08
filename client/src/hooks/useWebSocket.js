@@ -1,88 +1,82 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import { io } from 'socket.io-client'
 
 const SERVER_URL = 'http://localhost:3001'
 
 export function useWebSocket() {
-
   const socketRef = useRef(null)
   const [connected, setConnected] = useState(false)
 
-  // simple robot state
   const [robotState, setRobotState] = useState({
-    x: 0,
-    z: 0,
-    angle: 0,
+    position: { x: 0, y: 0.5, z: 0 },
+    rotation: { x: 0, y: 0, z: 0 },
+    velocity: { x: 0, y: 0, z: 0 },
+    angularVelocity: 0,
     speed: 0,
-    moving: false
+    isMoving: false,
+    battery: 100,
+    status: 'idle',
+    mode: 'manual'
   })
 
-  // connect socket
-  useEffect(() => {
-    const socket = io(SERVER_URL)
+  useEffect(function () {
+    var socket = io(SERVER_URL)
     socketRef.current = socket
 
-    socket.on('connect', () => setConnected(true))
-    socket.on('disconnect', () => setConnected(false))
+    socket.on('connect', function () {
+      console.log('Connected to server')
+      setConnected(true)
+    })
 
-    return () => socket.disconnect()
+    socket.on('disconnect', function () {
+      console.log('Disconnected from server')
+      setConnected(false)
+    })
+
+    // Listen for robot state updates from server
+    socket.on('robotState', function (state) {
+      setRobotState(state)
+    })
+
+    return function () {
+      socket.disconnect()
+    }
   }, [])
 
-  // send command
-  function sendCommand(cmd) {
-    if (socketRef.current && socketRef.current.connected) {
-      socketRef.current.emit('command', cmd)
-    } else {
-      // fallback simulation (very simple)
-      if (cmd.type === 'move') {
-        setRobotState(prev => ({
-          ...prev,
-          x: prev.x + cmd.linear * 0.1,
-          z: prev.z + cmd.linear * 0.1,
-          angle: prev.angle + cmd.angular * 0.05,
-          speed: cmd.linear,
-          moving: true
-        }))
-      }
-
-      if (cmd.type === 'stop') {
-        setRobotState(prev => ({
-          ...prev,
-          speed: 0,
-          moving: false
-        }))
-      }
-
-      if (cmd.type === 'reset') {
-        setRobotState({
-          x: 0,
-          z: 0,
-          angle: 0,
-          speed: 0,
-          moving: false
-        })
-      }
+  var move = useCallback(function (linear, angular) {
+    if (socketRef.current) {
+      socketRef.current.emit('command', {
+        type: 'move',
+        linear: linear,
+        angular: angular
+      })
     }
-  }
+  }, [])
 
-  // exposed functions (used in ControlPanel)
-  function move(l, a) {
-    sendCommand({ type: 'move', linear: l, angular: a })
-  }
+  var stop = useCallback(function () {
+    if (socketRef.current) {
+      socketRef.current.emit('command', { type: 'stop' })
+    }
+  }, [])
 
-  function stop() {
-    sendCommand({ type: 'stop' })
-  }
+  var reset = useCallback(function () {
+    if (socketRef.current) {
+      socketRef.current.emit('command', { type: 'reset' })
+    }
+  }, [])
 
-  function reset() {
-    sendCommand({ type: 'reset' })
-  }
+  var sendSensorData = useCallback(function (data) {
+    if (socketRef.current) {
+      socketRef.current.emit('sensorData', data)
+    }
+  }, [])
 
   return {
-    connected,
-    robotState,
-    move,
-    stop,
-    reset
+    robotState: robotState,
+    connected: connected,
+    move: move,
+    stop: stop,
+    reset: reset,
+    sendSensorData: sendSensorData
   }
 }
