@@ -10,6 +10,50 @@ const { Server } = require('socket.io')
 const cors = require('cors')
 require('dotenv').config()
 
+// ============================================
+// OBSTACLE DATA  (mirrors client/src/utils/obstacleData.js)
+// ============================================
+const OBSTACLES = [
+  { position: [3, 0.5, 2], size: [1, 1, 1] },
+  { position: [-2, 0.5, 4], size: [1.5, 1, 0.5] },
+  { position: [5, 0.75, -3], size: [0.8, 1, 0.8] },
+  { position: [-4, 0.5, -2], size: [2, 1, 1] },
+  { position: [0, 0.5, 7], size: [3, 1, 0.5] },
+  { position: [-6, 0.5, 6], size: [1, 1, 1] },
+  { position: [7, 0.5, 5], size: [1.2, 1, 1.2] },
+  { position: [-3, 0.5, -6], size: [0.8, 1, 2] },
+  { position: [6, 0.5, -7], size: [1.5, 1, 0.8] },
+  { position: [-7, 0.5, 0], size: [1, 1, 1.5] }
+]
+
+// Robot collision radius (approx half-width of the robot mesh)
+const ROBOT_RADIUS = 0.4
+
+/**
+ * Returns true if a circle (cx, cz, r) overlaps an axis-aligned box.
+ * Box defined by centre (bx, bz) and half-extents (hw, hd).
+ */
+function circleOverlapsBox(cx, cz, r, bx, bz, hw, hd) {
+  const dx = Math.max(0, Math.abs(cx - bx) - hw)
+  const dz = Math.max(0, Math.abs(cz - bz) - hd)
+  return (dx * dx + dz * dz) < (r * r)
+}
+
+/**
+ * Returns true when the given (x, z) position would put the robot
+ * inside any known obstacle.
+ */
+function isColliding(x, z) {
+  for (const obs of OBSTACLES) {
+    const bx = obs.position[0]
+    const bz = obs.position[2]
+    const hw = obs.size[0] / 2
+    const hd = obs.size[2] / 2
+    if (circleOverlapsBox(x, z, ROBOT_RADIUS, bx, bz, hw, hd)) return true
+  }
+  return false
+}
+
 const app = express()
 const PORT = process.env.PORT || 3001
 const CLIENT_URL = process.env.CLIENT_URL || 'http://localhost:5173'
@@ -193,6 +237,10 @@ const PHYSICS_DT = 1 / 60
 
 setInterval(() => {
   if (robotState.isMoving) {
+    // Save previous position so we can revert on collision
+    const prevX = robotState.position.x
+    const prevZ = robotState.position.z
+
     // Update position
     robotState.position.x += robotState.velocity.x * PHYSICS_DT
     robotState.position.z += robotState.velocity.z * PHYSICS_DT
@@ -211,12 +259,28 @@ setInterval(() => {
       z: robotState.speed * Math.cos(robotState.rotation.y)
     }
 
-    // Boundary check
+    // ── Boundary check ──────────────────────────────────────────────
     const limit = simSettings.boundaryLimit
     robotState.position.x = Math.max(-limit, Math.min(limit, robotState.position.x))
     robotState.position.z = Math.max(-limit, Math.min(limit, robotState.position.z))
 
-    // Battery drain
+    // ── Collision detection ─────────────────────────────────────────
+    // If the new position overlaps an obstacle, revert and stop the robot.
+    if (isColliding(robotState.position.x, robotState.position.z)) {
+      // Revert to pre-collision position
+      robotState.position.x = prevX
+      robotState.position.z = prevZ
+      // Kill movement
+      robotState.velocity = { x: 0, y: 0, z: 0 }
+      robotState.angularVelocity = 0
+      robotState.speed = 0
+      robotState.isMoving = false
+      robotState.status = 'crashed'
+      console.log(`💥 Collision at (${prevX.toFixed(2)}, ${prevZ.toFixed(2)})`)
+      io.emit('robotState', robotState)
+    }
+
+    // ── Battery drain ────────────────────────────────────────────────
     robotState.battery = Math.max(0, robotState.battery - 0.005)
     if (robotState.battery <= 0) {
       robotState.isMoving = false
