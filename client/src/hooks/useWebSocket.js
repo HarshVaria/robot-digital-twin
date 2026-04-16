@@ -71,12 +71,19 @@ export function useWebSocket() {
     }
   }, [])
 
+  var sendObstacles = useCallback(function (obstacles) {
+    if (socketRef.current) {
+      socketRef.current.emit('updateObstacles', obstacles)
+    }
+  }, [])
+
   return {
     robotState: robotState,
     connected: connected,
     move: move,
     stop: stop,
     reset: reset,
-    sendSensorData: sendSensorData
+    sendSensorData: sendSensorData,
+    sendObstacles: sendObstacles
   }
 }
