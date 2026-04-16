@@ -4,16 +4,22 @@
 // Author: Pulin
 // ============================================
 
-const express = require('express')
-const http = require('http')
-const { Server } = require('socket.io')
+const express = require('express');
+const http = require('http');
+const { Server } = require('socket.io');
 const cors = require('cors')
 require('dotenv').config()
 
 // ============================================
 // OBSTACLE DATA  (mirrors client/src/utils/obstacleData.js)
 // ============================================
-const OBSTACLES = [
+const lidar = require('../sensors/lidar');
+const imu = require('../sensors/imu');
+const encoder = require('../sensors/encoder');
+
+
+
+let OBSTACLES = [
   { position: [3, 0.5, 2], size: [1, 1, 1] },
   { position: [-2, 0.5, 4], size: [1.5, 1, 0.5] },
   { position: [5, 0.75, -3], size: [0.8, 1, 0.8] },
@@ -210,6 +216,17 @@ io.on('connection', (socket) => {
     if (data.velocity) robotState.velocity = data.velocity
   })
 
+  // ========== OBSTACLE SYNC FROM CLIENT ==========
+  socket.on('updateObstacles', (data) => {
+    if (Array.isArray(data)) {
+      OBSTACLES = data.map(o => ({
+        position: o.position,
+        size: o.size
+      }))
+      console.log(`🧱 Obstacles updated: ${OBSTACLES.length} total`)
+    }
+  })
+
   // ========== NAVIGATION COMPLETE ==========
   socket.on('navigationUpdate', (data) => {
     if (data.arrived) {
@@ -293,6 +310,8 @@ setInterval(() => {
 
   robotState.timestamp = Date.now()
 }, PHYSICS_DT * 1000)
+
+
 
 // Broadcast state at 30fps
 setInterval(() => {

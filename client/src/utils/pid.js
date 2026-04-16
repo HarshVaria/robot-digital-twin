@@ -55,34 +55,74 @@ PIDController.prototype.reset = function () {
 }
 
 export function RobotMotorController() {
-  this.speedPID = new PIDController(2.0, 0.5, 0.1, { outputMin: -5, outputMax: 5 })
-  this.headingPID = new PIDController(3.0, 0.1, 0.5, { outputMin: -3, outputMax: 3 })
   this.currentWaypointIndex = 0
+  // Tunable gains (the UI sliders will control these)
+  this.kp = 2.0   // proportional heading gain
+  this.ki = 0.0   // not used in direct mode, kept for UI compat
+  this.kd = 0.1   // derivative heading gain (damping)
+  this.prevHeadingError = 0
+  this.maxSpeed = 4.5         // cruise speed cap
+  this.waypointRadius = 0.6   // how close to be "at" a waypoint
+  this.finalRadius = 0.4      // arrival threshold for the LAST waypoint
+  this.lookAhead = 1.5        // skip waypoints within this radius
 }
 
-RobotMotorController.prototype.navigateToPoint = function (currentPos, targetPos, currentHeading) {
+RobotMotorController.prototype.navigateToPoint = function (currentPos, targetPos, currentHeading, isFinal, distToFinalGoal) {
   var dx = targetPos.x - currentPos.x
   var dz = targetPos.z - currentPos.z
   var distance = Math.sqrt(dx * dx + dz * dz)
-  var desiredHeading = Math.atan2(dx, dz)
 
+  // Desired heading: atan2(dx, dz) matches the server's sin/cos convention
+  var desiredHeading = Math.atan2(dx, dz)
   var headingError = desiredHeading - currentHeading
+
+  // Normalize to [-PI, PI]
   while (headingError > Math.PI) headingError -= 2 * Math.PI
   while (headingError < -Math.PI) headingError += 2 * Math.PI
 
-  var desiredSpeed = Math.min(distance * 0.8, 2.0)
-  this.speedPID.setTarget(desiredSpeed)
-  var linearVelocity = this.speedPID.update(0)
+  var absHeadingError = Math.abs(headingError)
 
-  this.headingPID.setTarget(0)
-  var angularVelocity = this.headingPID.update(-headingError)
+  // ── Angular velocity: proportional + derivative ──
+  var dError = headingError - this.prevHeadingError
+  var angularVelocity = this.kp * headingError + this.kd * dError
+  angularVelocity = Math.max(-4.0, Math.min(4.0, angularVelocity))
+  this.prevHeadingError = headingError
 
-  var speedReduction = Math.max(0.2, 1 - Math.abs(headingError) / Math.PI)
-  var arrived = distance < 0.3
+  // ── Linear velocity ──
+  var linearVelocity
+
+  // If heading is way off (> 60°), rotate in place first
+  if (absHeadingError > Math.PI / 3) {
+    linearVelocity = 0
+  } else {
+    // Base speed: proportional to distance, capped
+    linearVelocity = Math.min(distance * 2.0, this.maxSpeed)
+
+    // Reduce speed when heading is misaligned
+    var headingFactor = Math.max(0.3, 1.0 - absHeadingError / (Math.PI / 2))
+    linearVelocity *= headingFactor
+
+    // Smooth deceleration near the FINAL goal
+    if (isFinal && distToFinalGoal < 3.0) {
+      var brakeFactor = Math.max(0.15, distToFinalGoal / 3.0)
+      linearVelocity *= brakeFactor
+    }
+  }
+
+  // Minimum velocity to avoid stalling (unless truly arrived)
+  var threshold = isFinal ? this.finalRadius : this.waypointRadius
+  var arrived = distance < threshold
+
+  if (arrived) {
+    linearVelocity = 0
+    angularVelocity = 0
+  } else if (linearVelocity > 0 && linearVelocity < 0.3) {
+    linearVelocity = 0.3 // don't crawl, keep minimum momentum
+  }
 
   return {
-    linearVelocity: arrived ? 0 : linearVelocity * speedReduction,
-    angularVelocity: arrived ? 0 : angularVelocity,
+    linearVelocity: linearVelocity,
+    angularVelocity: angularVelocity,
     distance: distance,
     headingError: headingError * (180 / Math.PI),
     arrived: arrived
@@ -93,16 +133,41 @@ RobotMotorController.prototype.followPath = function (currentPos, currentHeading
   if (!path || path.length === 0 || this.currentWaypointIndex >= path.length) {
     return { linearVelocity: 0, angularVelocity: 0, arrived: true, waypointIndex: this.currentWaypointIndex, totalWaypoints: path ? path.length : 0 }
   }
+
+  // ── Look-ahead: skip past any waypoints we're already close to ──
+  while (this.currentWaypointIndex < path.length - 1) {
+    var wp = path[this.currentWaypointIndex]
+    var dxw = wp.x - currentPos.x
+    var dzw = wp.z - currentPos.z
+    var distToWp = Math.sqrt(dxw * dxw + dzw * dzw)
+    if (distToWp < this.lookAhead) {
+      this.currentWaypointIndex++
+    } else {
+      break
+    }
+  }
+
   var target = path[this.currentWaypointIndex]
-  var result = this.navigateToPoint(currentPos, target, currentHeading)
-  if (result.arrived && this.currentWaypointIndex < path.length - 1) {
+  var isFinal = this.currentWaypointIndex >= path.length - 1
+
+  // Distance to final goal for deceleration
+  var finalGoal = path[path.length - 1]
+  var dfx = finalGoal.x - currentPos.x
+  var dfz = finalGoal.z - currentPos.z
+  var distToFinalGoal = Math.sqrt(dfx * dfx + dfz * dfz)
+
+  var result = this.navigateToPoint(currentPos, target, currentHeading, isFinal, distToFinalGoal)
+
+  // Advance if we've arrived at a non-final waypoint
+  if (result.arrived && !isFinal) {
     this.currentWaypointIndex++
   }
+
   return {
     linearVelocity: result.linearVelocity,
     angularVelocity: result.angularVelocity,
     distance: result.distance,
-    arrived: result.arrived,
+    arrived: result.arrived && isFinal,
     waypointIndex: this.currentWaypointIndex,
     totalWaypoints: path.length
   }
@@ -110,6 +175,10 @@ RobotMotorController.prototype.followPath = function (currentPos, currentHeading
 
 RobotMotorController.prototype.resetNavigation = function () {
   this.currentWaypointIndex = 0
-  this.speedPID.reset()
-  this.headingPID.reset()
+  this.prevHeadingError = 0
+}
+
+// Compat: the UI PID sliders call setGains on speedPID
+RobotMotorController.prototype.speedPID = {
+  setGains: function () { } // no-op, gains set directly
 }
