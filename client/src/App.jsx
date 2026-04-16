@@ -258,11 +258,16 @@ export default function App() {
     kinematics.reset()
   }, [ws.reset])
 
+  var isDanger = false
+  if (Array.isArray(sensorData.lidar) && sensorData.lidar.length > 0) {
+    isDanger = sensorData.lidar.reduce((min, ray) => Math.min(min, ray.distance), Infinity) < 0.6
+  }
+
   return (
     <div style={{ width: '100vw', height: '100vh', position: 'relative', overflow: 'hidden' }}>
       <Canvas camera={{ position: [12, 10, 12], fov: 50 }} shadows style={{ background: '#0a0a1a' }} gl={{ antialias: true }}>
         <Scene>
-          <RobotModel position={ws.robotState.position} rotation={ws.robotState.rotation} speed={ws.robotState.speed || 0} isMoving={ws.robotState.isMoving} />
+          <RobotModel position={ws.robotState.position} rotation={ws.robotState.rotation} speed={ws.robotState.speed || 0} isMoving={ws.robotState.isMoving} isDanger={isDanger} />
           <SimEnvironment obstacles={obstacles} />
           <LidarVisualization scanData={sensorData.lidar} robotPosition={ws.robotState.position || { x: 0, z: 0 }} />
           {pathResult && pathResult.found && (
@@ -310,22 +315,14 @@ export default function App() {
         )}
       </div>
 
-      {/* Interaction Mode Indicator */}
-      <div style={{
-        position: 'absolute', top: 50, left: '50%', transform: 'translateX(-50%)',
-        background: '#0d1117cc', borderRadius: 12, padding: '4px 14px',
-        color: obstacleMode ? '#ff9800' : '#3fb950', fontFamily: 'monospace', fontSize: 11,
-        border: '1px solid ' + (obstacleMode ? '#ff9800' : '#3fb950') + '44', zIndex: 20,
-        pointerEvents: 'none'
-      }}>
-        {obstacleMode ? '🧱 Click grid to place obstacle' : '🎯 Click grid to set goal'}
-      </div>
+      {/* Removed Interaction Mode Indicator as requested */}
 
       {/* Left Side Swappable Container */}
       <div style={{
         position: 'absolute',
         left: '10px',
-        top: '60px',
+        top: '50%',
+        transform: 'translateY(-50%)',
         width: '280px',
         display: 'flex',
         flexDirection: 'column',
@@ -393,8 +390,21 @@ export default function App() {
         </div>
       </div>
 
-      <SensorPanel imuData={sensorData.imu} encoderData={sensorData.encoder} lidarData={sensorData.lidar} />
-      <TelemetryDisplay robotState={ws.robotState} connected={ws.connected} />
+      {/* Right Side Unified Telemetry Stack */}
+      <div style={{
+        position: 'absolute',
+        right: '10px',
+        top: '50%',
+        transform: 'translateY(-50%)',
+        width: '300px',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '8px',
+        zIndex: 10
+      }}>
+        <SensorPanel imuData={sensorData.imu} encoderData={sensorData.encoder} lidarData={sensorData.lidar} />
+        <TelemetryDisplay robotState={ws.robotState} connected={ws.connected} activePanel={activePanel} />
+      </div>
 
       {/* Navigation Progress Bar */}
       {isNavigating && pathResult && (

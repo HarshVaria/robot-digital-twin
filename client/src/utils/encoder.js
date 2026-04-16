@@ -12,8 +12,8 @@ export class EncoderSensor {
   }
 
   update(leftSpeed, rightSpeed, dt) {
-    var lt = Math.round((leftSpeed * dt / (2 * Math.PI)) * this.ticksPerRev + this.gn() * this.noise * this.ticksPerRev)
-    var rt = Math.round((rightSpeed * dt / (2 * Math.PI)) * this.ticksPerRev + this.gn() * this.noise * this.ticksPerRev)
+    var lt = Math.abs(leftSpeed) < 0.001 ? 0 : Math.round((leftSpeed * dt / (2 * Math.PI)) * this.ticksPerRev + this.gn() * this.noise * this.ticksPerRev)
+    var rt = Math.abs(rightSpeed) < 0.001 ? 0 : Math.round((rightSpeed * dt / (2 * Math.PI)) * this.ticksPerRev + this.gn() * this.noise * this.ticksPerRev)
 
     this.leftTicks += lt
     this.rightTicks += rt
