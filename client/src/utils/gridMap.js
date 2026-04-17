@@ -32,6 +32,39 @@ export class GridMap {
     }
   }
 
+  findNearestFreeCell(row, col, maxRadii) {
+    if (this.isFree(row, col)) return { row: row, col: col }
+    maxRadii = maxRadii || 30 // max radius to search
+    var queue = [{ row: row, col: col, dist: 0 }]
+    var visited = {}
+    visited[row + ',' + col] = true
+
+    while (queue.length > 0) {
+      var cur = queue.shift()
+      if (cur.dist > maxRadii) return null
+
+      if (this.isFree(cur.row, cur.col)) {
+        return { row: cur.row, col: cur.col }
+      }
+
+      var dirs = [
+        [-1, 0], [1, 0], [0, -1], [0, 1],
+        [-1, -1], [-1, 1], [1, -1], [1, 1]
+      ]
+
+      for (var i = 0; i < dirs.length; i++) {
+        var nr = cur.row + dirs[i][0]
+        var nc = cur.col + dirs[i][1]
+        var key = nr + ',' + nc
+        if (nr >= 0 && nr < this.rows && nc >= 0 && nc < this.cols && !visited[key]) {
+          visited[key] = true
+          queue.push({ row: nr, col: nc, dist: cur.dist + 1 })
+        }
+      }
+    }
+    return null
+  }
+
   addObstacle(position, size, inflation) {
     inflation = inflation || 1
     var minX = position[0] - size[0] / 2 - inflation * this.cellSize

@@ -57,6 +57,10 @@ function astarSearch(gridMap, start, goal) {
     var startCell = gridMap.worldToGrid(start.x, start.z)
     var goalCell = gridMap.worldToGrid(goal.x, goal.z)
 
+    // Fallback to nearest free cells if exactly on an obstacle
+    startCell = gridMap.findNearestFreeCell(startCell.row, startCell.col, 5) || startCell
+    goalCell = gridMap.findNearestFreeCell(goalCell.row, goalCell.col, 30) || goalCell
+
     if (gridMap.isObstacle(startCell.row, startCell.col) || gridMap.isObstacle(goalCell.row, goalCell.col)) {
         return {
             path: [],
