@@ -84,7 +84,9 @@ export default function App() {
   const [activePanel, setActivePanel] = useState('control')
 
   var [sensorData, setSensorData] = useState({ lidar: [], imu: null, encoder: null })
-  var [pathResult, setPathResult] = useState(null)
+  var [pathResults, setPathResults] = useState(null)
+  var [selectedPathId, setSelectedPathId] = useState(null)
+  var [algorithm, setAlgorithm] = useState('astar')
   var [goalPosition, setGoalPosition] = useState({ x: 8, z: 8 })
   var [startPosition, setStartPosition] = useState({ x: 0, z: 0 })
   var [pidGains, setPidGains] = useState({ kp: 2.0, ki: 0.5, kd: 0.1 })
@@ -135,14 +137,15 @@ export default function App() {
 
   // ── Path following loop (30 Hz for faster response) ──
   useEffect(function () {
-    if (!isNavigating || !pathResult || !pathResult.path || pathResult.path.length === 0) return
+    if (!isNavigating || !pathResults || !selectedPathId || !pathResults[selectedPathId] || !pathResults[selectedPathId].path || pathResults[selectedPathId].path.length === 0) return
     var interval = setInterval(function () {
       var state = robotStateRef.current
       if (!state || !state.position) return
 
-      var result = motorController.followPath(state.position, state.rotation ? state.rotation.y : 0, pathResult.path)
+      var activePath = pathResults[selectedPathId].path
+      var result = motorController.followPath(state.position, state.rotation ? state.rotation.y : 0, activePath)
       setCurrentWaypoint(result.waypointIndex)
-      if (result.arrived && result.waypointIndex >= pathResult.path.length - 1) {
+      if (result.arrived && result.waypointIndex >= activePath.length - 1) {
         setIsNavigating(false)
         ws.stop()
         motorController.resetNavigation()
@@ -151,44 +154,86 @@ export default function App() {
       }
     }, 1000 / 30)
     return function () { clearInterval(interval) }
-  }, [isNavigating, pathResult, ws.stop, ws.move])
+  }, [isNavigating, pathResults, selectedPathId, ws.stop, ws.move])
 
-  // ── Run algorithm ──
-  var handleRunAlgorithm = useCallback(function (algorithm) {
+  // ── Run algorithms ──
+  var handleComputePaths = useCallback(function (selectedAlgo) {
     var freshGrid = new GridMap(30, 30, 1)
+    freshGrid.penalties = {}
     for (var i = 0; i < obstacles.length; i++) {
       freshGrid.addObstacle(obstacles[i].position, obstacles[i].size, 0)
     }
 
+    var state = robotStateRef.current || {}
     var start = {
-      x: ws.robotState.position ? ws.robotState.position.x : 0,
-      z: ws.robotState.position ? ws.robotState.position.z : 0
+      x: state.position ? state.position.x : 0,
+      z: state.position ? state.position.z : 0
     }
 
-    console.log('Running algorithm:', algorithm, 'Start:', start, 'Goal:', goalPosition)
+    console.log('Computing paths...', 'Start:', start, 'Goal:', goalPosition)
 
-    var result = algorithm === 'astar'
-      ? astar(freshGrid, start, goalPosition)
-      : dijkstra(freshGrid, start, goalPosition)
+    var algFn = selectedAlgo === 'dijkstra' ? dijkstra : astar;
+    var newResults = {}
+    
+    for (var p = 1; p <= 6; p++) {
+       var res = algFn(freshGrid, start, goalPosition)
+       if (res.found && res.path && res.path.length > 0) {
+         res.path = simplifyPath(res.path)
+         newResults['path' + p] = res
+         
+         // 1. Lightly penalize explored cells to encourage entirely new area exploration
+         for(var j=0; j<res.visited.length; j++) {
+           var vr = res.visited[j].row
+           var vc = res.visited[j].col
+           freshGrid.penalties[vr + ',' + vc] = (freshGrid.penalties[vr + ',' + vc] || 0) + 0.2
+         }
 
-    // Simplify path to skip collinear waypoints → much faster following
-    if (result.found && result.path) {
-      result.path = simplifyPath(result.path)
+         // 2. Heavily penalize the actual path to force deviation
+         for(var j=1; j<res.path.length-1; j++) {
+           var r = res.path[j].row
+           var c = res.path[j].col
+           freshGrid.penalties[r + ',' + c] = (freshGrid.penalties[r + ',' + c] || 0) + 15.0
+         }
+       } else {
+         break;
+       }
     }
 
-    console.log('Path Result:', result.found ? result.path.length + ' waypoints' : 'not found')
+    setPathResults(newResults)
 
-    setPathResult(result)
+    // Auto-select shortest
+    var shortestId = null
+    var minDist = Infinity
+    for (var key in newResults) {
+       if (newResults[key].distance < minDist) {
+          minDist = newResults[key].distance
+          shortestId = key
+       }
+    }
+    setSelectedPathId(shortestId)
+
     setStartPosition(start)
     setCurrentWaypoint(0)
     motorController.resetNavigation()
-  }, [ws.robotState, goalPosition, obstacles])
+  }, [goalPosition, obstacles])
+
+  // ── Auto-recompute paths dynamically when hazards change ──
+  var prevObstacleCount = useRef(obstacles.length)
+  useEffect(function() {
+    if (obstacles.length !== prevObstacleCount.current) {
+      prevObstacleCount.current = obstacles.length
+      if (pathResults && goalPosition) {
+        handleComputePaths(algorithm)
+      }
+    }
+  }, [obstacles, pathResults, algorithm, handleComputePaths, goalPosition])
 
   // ── Set goal (from click or manual input) ──
   var handleSetGoal = useCallback(function (goal) {
     setGoalPosition(goal)
     setIsNavigating(false)
-    setPathResult(null)
+    setPathResults(null)
+    setSelectedPathId(null)
   }, [])
 
   // ── Ground click handler ──
@@ -219,16 +264,17 @@ export default function App() {
 
   var handleClearUserObstacles = useCallback(function () {
     setObstacles(DEFAULT_OBSTACLES)
-    setPathResult(null)
+    setPathResults(null)
+    setSelectedPathId(null)
   }, [])
 
   var handleFollowPath = useCallback(function () {
-    if (pathResult && pathResult.found) {
+    if (pathResults && selectedPathId && pathResults[selectedPathId] && pathResults[selectedPathId].found) {
       motorController.resetNavigation()
       setCurrentWaypoint(0)
       setIsNavigating(true)
     }
-  }, [pathResult])
+  }, [pathResults, selectedPathId])
 
   var handleStopNavigation = useCallback(function () {
     setIsNavigating(false)
@@ -250,7 +296,8 @@ export default function App() {
   var handleReset = useCallback(function () {
     ws.reset()
     setIsNavigating(false)
-    setPathResult(null)
+    setPathResults(null)
+    setSelectedPathId(null)
     setCurrentWaypoint(0)
     motorController.resetNavigation()
     encoder.reset()
@@ -270,10 +317,10 @@ export default function App() {
           <RobotModel position={ws.robotState.position} rotation={ws.robotState.rotation} speed={ws.robotState.speed || 0} isMoving={ws.robotState.isMoving} isDanger={isDanger} />
           <SimEnvironment obstacles={obstacles} />
           <LidarVisualization scanData={sensorData.lidar} robotPosition={ws.robotState.position || { x: 0, z: 0 }} />
-          {pathResult && pathResult.found && (
+          {pathResults && (
             <PathVisualizer
-              path={pathResult.path}
-              visitedCells={pathResult.visited}
+              pathResults={pathResults}
+              selectedPathId={selectedPathId}
               gridMap={gridMapRef.current}
               startPos={startPosition}
               goalPos={goalPosition}
@@ -283,7 +330,7 @@ export default function App() {
           {/* Click-on-ground for goal or obstacle placement */}
           <GroundClickPlane onClickGround={handleClickGround} />
           {/* Show goal marker even when no path yet */}
-          {!pathResult && goalPosition && (
+          {!pathResults && goalPosition && (
             <group position={[goalPosition.x, 0, goalPosition.z]}>
               <mesh position={[0, 0.4, 0]}>
                 <sphereGeometry args={[0.2, 16, 16]} />
@@ -317,19 +364,29 @@ export default function App() {
 
       {/* Removed Interaction Mode Indicator as requested */}
 
+      {/* Global CSS for scrollbars */}
+      <style>{`
+        .scrollable-panel::-webkit-scrollbar { width: 6px; }
+        .scrollable-panel::-webkit-scrollbar-track { background: transparent; }
+        .scrollable-panel::-webkit-scrollbar-thumb { background: rgba(139, 148, 158, 0.4); border-radius: 3px; }
+        .scrollable-panel::-webkit-scrollbar-thumb:hover { background: rgba(139, 148, 158, 0.8); }
+      `}</style>
+      
       {/* Left Side Swappable Container */}
-      <div style={{
+      <div className="scrollable-panel" style={{
         position: 'absolute',
         left: '10px',
-        top: '50%',
-        transform: 'translateY(-50%)',
+        top: '10px',
+        maxHeight: 'calc(100vh - 20px)',
+        overflowY: 'auto',
         width: '280px',
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'stretch',
         gap: '12px',
         boxSizing: 'border-box',
-        zIndex: 10
+        zIndex: 10,
+        paddingRight: '4px'
       }}>
 
         {/* Sleek Toggle Switcher */}
@@ -372,11 +429,15 @@ export default function App() {
             <ControlPanel onMove={ws.move} onStop={ws.stop} onReset={handleReset} robotState={ws.robotState} connected={ws.connected} />
           ) : (
             <AlgorithmSelector
-              onRunAlgorithm={handleRunAlgorithm}
+              algorithm={algorithm}
+              onAlgorithmChange={setAlgorithm}
+              onComputePaths={() => handleComputePaths(algorithm)}
               onSetGoal={handleSetGoal}
               onFollowPath={handleFollowPath}
               onStopNavigation={handleStopNavigation}
-              result={pathResult}
+              pathResults={pathResults}
+              selectedPathId={selectedPathId}
+              onSelectPath={setSelectedPathId}
               pidGains={pidGains}
               onPIDChange={handlePIDChange}
               isNavigating={isNavigating}
@@ -407,7 +468,7 @@ export default function App() {
       </div>
 
       {/* Navigation Progress Bar */}
-      {isNavigating && pathResult && (
+      {isNavigating && pathResults && selectedPathId && pathResults[selectedPathId] && (
         <div style={{
           position: 'absolute', bottom: 10, left: '50%', transform: 'translateX(-50%)',
           background: '#0d1117ee', borderRadius: 12, padding: '8px 20px',
@@ -415,11 +476,11 @@ export default function App() {
           display: 'flex', alignItems: 'center', gap: 12,
           border: '1px solid #238636', zIndex: 20
         }}>
-          <span>🤖 Navigating</span>
+          <span>🤖 Navigating ({selectedPathId})</span>
           <div style={{ width: 120, height: 6, background: '#21262d', borderRadius: 3, overflow: 'hidden' }}>
-            <div style={{ width: (currentWaypoint / pathResult.path.length) * 100 + '%', height: '100%', background: '#3fb950', borderRadius: 3, transition: 'width 0.3s' }} />
+            <div style={{ width: (currentWaypoint / pathResults[selectedPathId].path.length) * 100 + '%', height: '100%', background: '#3fb950', borderRadius: 3, transition: 'width 0.3s' }} />
           </div>
-          <span style={{ color: '#3fb950' }}>{currentWaypoint}/{pathResult.path.length}</span>
+          <span style={{ color: '#3fb950' }}>{currentWaypoint}/{pathResults[selectedPathId].path.length}</span>
         </div>
       )}
     </div>

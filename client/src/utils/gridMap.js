@@ -14,6 +14,7 @@ export class GridMap {
     }
     this.offsetX = -this.width / 2
     this.offsetZ = -this.height / 2
+    this.penalties = {}
   }
 
   worldToGrid(x, z) {
@@ -66,7 +67,7 @@ export class GridMap {
   }
 
   addObstacle(position, size, inflation) {
-    inflation = inflation || 1
+    inflation = inflation !== undefined ? inflation : 1
     var minX = position[0] - size[0] / 2 - inflation * this.cellSize
     var maxX = position[0] + size[0] / 2 + inflation * this.cellSize
     var minZ = position[2] - size[2] / 2 - inflation * this.cellSize
@@ -109,7 +110,8 @@ export class GridMap {
         if (Math.abs(dr) + Math.abs(dc) === 2) {
           if (!this.isFree(row + dr, col) || !this.isFree(row, col + dc)) continue
         }
-        neighbors.push({ row: nr, col: nc, cost: cost })
+        var penalty = this.penalties[nr + ',' + nc] || 0
+        neighbors.push({ row: nr, col: nc, cost: cost + penalty })
       }
     }
     return neighbors
@@ -121,5 +123,6 @@ export class GridMap {
         if (this.grid[r][c] !== 1) this.grid[r][c] = 0
       }
     }
+    this.penalties = {}
   }
 }

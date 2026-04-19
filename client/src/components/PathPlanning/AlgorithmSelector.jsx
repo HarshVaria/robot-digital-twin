@@ -13,8 +13,8 @@ const IconBrick = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="no
 const IconTrash = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2" /></svg>
 
 export default function AlgorithmSelector({
-  onRunAlgorithm, onSetGoal, onFollowPath, onStopNavigation,
-  result, pidGains, onPIDChange, isNavigating,
+  algorithm, onAlgorithmChange, onComputePaths, onSetGoal, onFollowPath, onStopNavigation,
+  pathResults, selectedPathId, onSelectPath, pidGains, onPIDChange, isNavigating,
   goalPosition, obstacleMode, onToggleObstacleMode, onClearObstacles, obstacleCount
 }) {
   pidGains = pidGains || { kp: 2, ki: 0.5, kd: 0.1 }
@@ -22,7 +22,7 @@ export default function AlgorithmSelector({
   goalPosition = goalPosition || { x: 8, z: 8 }
   obstacleCount = obstacleCount || 0
 
-  const [algo, setAlgo] = useState('astar')
+  obstacleCount = obstacleCount || 0
   const [gx, setGx] = useState(goalPosition.x)
   const [gz, setGz] = useState(goalPosition.z)
 
@@ -57,10 +57,9 @@ export default function AlgorithmSelector({
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <span style={{ fontSize: 10, color: '#8b949e', fontWeight: 600, letterSpacing: '1px' }}>MISSION SETUP</span>
         </div>
-        
         <div style={{ display: 'flex', gap: 10 }}>
-          <button onClick={() => setAlgo('astar')} style={{ ...b, flex: 1, background: algo==='astar'?'rgba(96, 165, 250, 0.2)':'rgba(48, 54, 61, 0.5)', color: algo==='astar'?'#60a5fa':'#8b949e', border: algo==='astar'?'1px solid #60a5fa':'1px solid rgba(255,255,255,0.05)', padding: '10px' }}><IconStar /> A*</button>
-          <button onClick={() => setAlgo('dijkstra')} style={{ ...b, flex: 1, background: algo==='dijkstra'?'rgba(167, 139, 250, 0.2)':'rgba(48, 54, 61, 0.5)', color: algo==='dijkstra'?'#a78bfa':'#8b949e', border: algo==='dijkstra'?'1px solid #a78bfa':'1px solid rgba(255,255,255,0.05)', padding: '10px' }}><IconDiamond /> Dijkstra</button>
+          <button onClick={() => onAlgorithmChange('astar')} style={{ ...b, flex: 1, background: algorithm==='astar'?'rgba(96, 165, 250, 0.2)':'rgba(48, 54, 61, 0.5)', color: algorithm==='astar'?'#60a5fa':'#8b949e', border: algorithm==='astar'?'1px solid #60a5fa':'1px solid rgba(255,255,255,0.05)', padding: '10px' }}><IconStar /> A*</button>
+          <button onClick={() => onAlgorithmChange('dijkstra')} style={{ ...b, flex: 1, background: algorithm==='dijkstra'?'rgba(167, 139, 250, 0.2)':'rgba(48, 54, 61, 0.5)', color: algorithm==='dijkstra'?'#a78bfa':'#8b949e', border: algorithm==='dijkstra'?'1px solid #a78bfa':'1px solid rgba(255,255,255,0.05)', padding: '10px' }}><IconDiamond /> Dijkstra</button>
         </div>
 
         <div style={{ display: 'flex', gap: 10 }}>
@@ -72,30 +71,73 @@ export default function AlgorithmSelector({
 
       {/* Actions */}
       <div style={{ display: 'flex', gap: 10 }}>
-        <button onClick={() => onRunAlgorithm(algo)} style={{ ...b, flex: 1, background: 'rgba(48, 54, 61, 0.5)', color: '#c9d1d9', border: '1px solid rgba(255,255,255,0.05)' }}><IconSearch /> COMPUTE PATH</button>
+        <button onClick={() => onComputePaths()} style={{ ...b, flex: 1, background: 'rgba(48, 54, 61, 0.5)', color: '#c9d1d9', border: '1px solid rgba(255,255,255,0.05)' }}><IconSearch /> COMPUTE PATHS</button>
         
         {isNavigating ? (
           <button onClick={onStopNavigation} style={{ ...b, flex: 1, background: '#f85149', color: 'white', border: '1px solid #f85149' }}><IconSquare /> ABORT</button>
         ) : (
-          <button onClick={onFollowPath} disabled={!(result && result.found)} style={{ ...b, flex: 1, background: 'rgba(74, 222, 128, 0.2)', color: '#4ade80', border: '1px solid #4ade80', opacity: !(result && result.found) ? 0.3 : 1 }}>
+          <button onClick={onFollowPath} disabled={!(pathResults && selectedPathId && pathResults[selectedPathId] && pathResults[selectedPathId].found)} style={{ ...b, flex: 1, background: 'rgba(74, 222, 128, 0.2)', color: '#4ade80', border: '1px solid #4ade80', opacity: !(pathResults && selectedPathId && pathResults[selectedPathId] && pathResults[selectedPathId].found) ? 0.3 : 1 }}>
             <IconPlay /> EXECUTE
           </button>
         )}
       </div>
 
       {/* Results Box */}
-      {result && (
-        <div style={{ background: 'rgba(17, 20, 24, 0.5)', borderRadius: 8, padding: '14px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: result.found ? '#4ade80' : '#f85149', fontWeight: 700, fontSize: 13 }}>
-            {result.found ? <IconCheck /> : <IconX />}
-            {result.found ? `${(result.distance || 0).toFixed(1)}m` : 'UNREACHABLE'}
-          </div>
-          {result.found && (
-            <div style={{ display: 'flex', gap: 14, color: '#8b949e', fontSize: 11, fontWeight: 600 }}>
-              <span>ITER <span style={{ color: 'white' }}>{result.iterations}</span></span>
-              <span>TIME <span style={{ color: 'white' }}>{result.time}ms</span></span>
-            </div>
-          )}
+      {pathResults && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: '200px', overflowY: 'auto', paddingRight: '4px', contain: 'paint' }}>
+          <style>{`
+            div::-webkit-scrollbar { width: 4px; }
+            div::-webkit-scrollbar-track { background: rgba(0,0,0,0.1); border-radius: 2px; }
+            div::-webkit-scrollbar-thumb { background: rgba(139, 148, 158, 0.4); border-radius: 2px; }
+            div::-webkit-scrollbar-thumb:hover { background: rgba(139, 148, 158, 0.8); }
+          `}</style>
+          {Object.keys(pathResults).map((algoKey, index) => {
+            const res = pathResults[algoKey];
+            if (!res) return null;
+            const isSelected = selectedPathId === algoKey;
+            
+            // Determine if it's the absolute shortest valid path
+            let isShortest = true;
+            if (res.found) {
+               for(const otherKey in pathResults) {
+                 const otherRes = pathResults[otherKey];
+                 if (otherRes && otherRes.found && otherRes.distance < res.distance) {
+                   isShortest = false;
+                   break;
+                 }
+               }
+            }
+
+            return (
+              <div 
+                key={algoKey}
+                onClick={() => { if (res.found) onSelectPath(algoKey) }}
+                style={{ 
+                  background: isSelected ? 'rgba(96, 165, 250, 0.2)' : 'rgba(17, 20, 24, 0.5)', 
+                  border: isSelected ? '1px solid #60a5fa' : '1px solid transparent',
+                  borderRadius: 8, padding: '10px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                  cursor: res.found ? 'pointer' : 'default', transition: 'all 0.2s'
+                }}
+              >
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <div style={{ color: 'white', fontSize: 12, fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <IconMap /> Option {index + 1}
+                    {isShortest && res.found && <span style={{ background: '#eab308', color: '#422006', fontSize: 9, padding: '2px 6px', borderRadius: 4, fontWeight: 'bold' }}>SHORTEST</span>}
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: res.found ? '#4ade80' : '#f85149', fontWeight: 700, fontSize: 11 }}>
+                    {res.found ? <IconCheck /> : <IconX />}
+                    {res.found ? `${(res.distance || 0).toFixed(1)}m` : 'UNREACHABLE'}
+                  </div>
+                </div>
+                {res.found && (
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 4, color: '#8b949e', fontSize: 10, fontWeight: 600 }}>
+                    <span>ITER <span style={{ color: 'white' }}>{res.iterations}</span></span>
+                    <span>TIME <span style={{ color: 'white' }}>{res.time}ms</span></span>
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
 
